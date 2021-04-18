@@ -1,0 +1,259 @@
+import copy
+import math
+import time
+
+
+def load_instance(filename):
+    vertices = []
+    with open(filename, 'r') as f:
+        data = f.readlines()
+        data = data[6:-1]
+    for line in data:
+        vertices.append([int(v) for v in line.split()[1:]])
+    return vertices
+
+
+def greedy_cycle(distance_matrix, start_vertex=0):
+    vertices1 = []
+    vertices1.append(start_vertex)
+    vertices2 = []
+    vertices2.append(get_second_vertex(start_vertex, distance_matrix))
+
+    matrix_len = len(distance_matrix)
+
+    for l in range(matrix_len - 2):
+        if l % 2 == 0:
+            vertices, vertices_2 = vertices1, vertices2
+        else:
+            vertices, vertices_2 = vertices2, vertices1
+        best_vertex, best_position, _ = get_best_insertion(vertices, vertices_2, distance_matrix)
+        vertices.insert(best_position, best_vertex)
+    return vertices1 + vertices1[:1], vertices2 + vertices2[:1]
+
+
+def get_second_vertex(first_vertex, distance_matrix):
+    max_distance = max(distance_matrix[first_vertex])
+    return distance_matrix[first_vertex].index(max_distance)
+
+
+def create_distance_matrix(vertices):
+    matrix = []
+    for i in vertices:
+        line = []
+        for j in vertices:
+            distance = round(math.sqrt((i[0] - j[0]) ** 2 + (i[1] - j[1]) ** 2))
+            line.append(distance)
+        matrix.append(line)
+    return matrix
+
+
+def calculate_score(vertices, distance_matrix, cycle=False):
+    score = 0
+    for i in range(len(vertices) - 1):
+        score += distance_matrix[vertices[i]][vertices[i+1]]
+    if cycle and len(vertices) > 2:
+        score += distance_matrix[vertices[0]][vertices[-1]]
+    return score
+
+
+def get_best_insertion(vertices, vertices2, distance_matrix, position=True, cycle=False):
+    best_vertex = None
+    best_score = None
+    best_position = None
+
+    for i in range(len(distance_matrix)):
+        if i in vertices + vertices2:
+            continue
+        for position in range(len(vertices) + 1):
+            temp_vertices = copy.copy(vertices)
+            temp_vertices.insert(position, i)
+            score = calculate_score(temp_vertices, distance_matrix, cycle=True)
+            if best_score is None or score < best_score:
+                best_score = score
+                best_vertex = i
+                best_position = position
+
+    return best_vertex, best_position, best_score
+
+
+def get_lm_list(vertices1, vertices2, distance_matrix):
+    lm = []
+    vertices = vertices1 + vertices2
+
+    vertices2_score = calculate_score(vertices2, distance_matrix)
+    vertices1_score = calculate_score(vertices1, distance_matrix)
+    base_score = vertices1_score + vertices2_score
+    
+    for vertex_i in vertices:
+        for vertex_j in vertices:
+            if vertex_i != vertex_j:
+                if vertex_i in vertices1 and vertex_j in vertices1 and vertex_i != vertex_j and vertex_i != vertex_j-1 and vertex_i != vertex_j+1:
+                    vertex_i = vertices1.index(vertex_i)
+                    vertex_j = vertices1.index(vertex_j)
+                    updated_vertices = copy.deepcopy(vertices1)
+                    updated_vertices[vertex_i:vertex_j] = updated_vertices[vertex_i:vertex_j][::-1]
+                    score = calculate_score(updated_vertices, distance_matrix) + vertices2_score
+                    if score < base_score:
+                        lm.append((score, [vertex_i, vertex_j]))
+                if vertex_i in vertices2 and vertex_j in vertices2 and vertex_i != vertex_j and vertex_i != vertex_j-1 and vertex_i != vertex_j+1:
+                    vertex_i = vertices2.index(vertex_i)
+                    vertex_j = vertices2.index(vertex_j)
+                    updated_vertices = copy.deepcopy(vertices2)
+                    updated_vertices[vertex_i:vertex_j] = updated_vertices[vertex_i:vertex_j][::-1]
+                    score = calculate_score(updated_vertices, distance_matrix) + vertices1_score
+                    if score < base_score:
+                        lm.append((score, [vertex_i, vertex_j]))
+
+    lm = sorted(lm, key=lambda x: x[0])
+
+    return lm
+
+
+def get_best_move_with_score(vertices1, vertices2, vertex, distance_matrix):
+    moves = []
+    try:
+        distance_matrix_row = distance_matrix[vertices1[vertex]]
+    except:
+        return None
+    knn_value = sorted(distance_matrix[vertices1[vertex]])[1:11]
+    knn_index = [distance_matrix_row.index(v) for v in knn_value]
+
+    vertices2_score = calculate_score(vertices2, distance_matrix)
+    vertices1_score = calculate_score(vertices1, distance_matrix)
+    base_score = vertices1_score + vertices2_score
+
+    for n in knn_index:
+        if n in vertices1:  # wewnatrz trasowe
+            n_position = vertices1.index(n)
+            if vertex != n_position and vertex != n_position-1 and vertex != n_position+1:  # check possibility
+                updated_vertices = copy.deepcopy(vertices1)
+                updated_vertices[vertex:n_position] = updated_vertices[vertex:n_position][::-1]
+                score = calculate_score(updated_vertices, distance_matrix) + vertices2_score
+                if score < base_score:
+                    moves.append((score, [updated_vertices, vertices2]))
+        else:  # zew.
+            n_position = vertices2.index(n)
+            if vertex != n_position:
+                v1 = vertices1[:vertex+1] + vertices2[n_position:]
+                v2 = vertices2[:n_position] + vertices1[vertex+1:]
+                score = calculate_score(v1, distance_matrix) + calculate_score(v2, distance_matrix)
+                if score < base_score:
+                    moves.append((score, (v1, v2)))
+
+    best_move = None
+    if moves:  # check any cand moves
+        best_move = min(moves, key=lambda x: x[0])
+    return best_move
+
+
+def update_cycle(vertices1, vertices2, distance_matrix):
+    for vertex in range(len(vertices1)):
+        best_move = get_best_move_with_score(vertices1, vertices2, vertex, distance_matrix)
+        if best_move:
+            vertices1, vertices2 = best_move[1]
+    return vertices1, vertices2
+
+
+def c_moves(vertices1, vertices2, distance_matrix):
+    vertices1, vertices2 = update_cycle(vertices1, vertices2, distance_matrix)
+    for vertex in range(len(vertices2)):
+        best_move = get_best_move_with_score(vertices2, vertices1, vertex, distance_matrix)
+        if best_move:
+            vertices2, vertices1 = best_move[1]
+    return vertices1, vertices2
+
+
+def swaping_edge(vertices,x,y):
+    result = []
+    id_x = vertices.index(x)
+    id_y = vertices.index(y)
+
+    for i in range(id_x+1):
+        result.append(vertices[i])
+
+    for i in range (id_y,id_x,-1):
+        result.append(vertices[i])
+    
+    if(id_y<len(vertices)):
+        for i in range(id_y+1,len(vertices)):
+            result.append(vertices[i])
+    return result
+
+
+def swaping_cycle(vertices1,vertices2,x,y):
+    result1 = []
+    result2 = []
+    for i in range(len(vertices1)):
+        if vertices1[i] == x:
+           result1.append(y)
+        else:
+            result1.append(vertices1[i])
+
+    for i in range(len(vertices2)):
+        if vertices2[i] == y:
+           result2.append(x)
+        else:
+            result2.append(vertices2[i])
+    return result1,result2
+
+
+def steepest(vertices1,vertices2,distance):  
+    result_f1 = copy.copy(vertices1)
+    result_f2 = copy.copy(vertices2)
+    score_f1 = calculate_score(vertices1, distance) 
+    score_f2 = calculate_score(vertices2, distance)
+    temp1=[]
+    temp2=[]
+    score=0
+    helper=0
+    for i in range(len(vertices1)):
+        for j in range(len(vertices1)):
+            temp1, temp2 = swaping_cycle(vertices1, vertices2, vertices1[i], vertices2[j])
+            if calculate_score(temp1, distance) + calculate_score(temp2, distance) < score_f1 + score_f2:
+                result_f1 = temp1
+                result_f2 = temp2
+                score_f1 = calculate_score(temp1, distance)
+                score_f2 = calculate_score(temp2, distance)
+                helper = 1
+
+    for i in range(len(vertices1)-2):
+        for j in range(i+1,len(vertices1)-1):
+            temp1 = swaping_edge(vertices1, vertices1[i], vertices1[j])
+            score = calculate_score(temp1, distance)
+            if score < score_f1:
+                result_f1 = temp1
+                score_f1 = score
+                helper = 1
+
+            temp2 = swaping_edge(vertices2, vertices2[i], vertices2[j])
+            score = calculate_score(temp2, distance)
+            if score < score_f2:
+                result_f2 = temp2
+                score_f2 = score
+                helper = 1
+            
+    return result_f1, result_f2, score_f1, score_f2, helper
+
+
+def lm_search_test(vertices1, vertices2, distance_matrix):
+    lm = get_lm_list(vertices1, vertices2, distance_matrix)
+    lm = sorted(lm, key=lambda x: x[0])
+    print(lm)
+    for l in lm:
+        if l[1][0] in vertices1 and l[1][1] in vertices1:
+            pos_1 = vertices1.index(l[1][0])
+            pos_2 = vertices1.index(l[1][1])
+            if pos_1 != pos_2 and pos_1 != pos_2-1 and pos_1 != pos_2+1:
+                v1 = copy.deepcopy(vertices1)
+                if calculate_score(v1, distance_matrix) < calculate_score(vertices1, distance_matrix):
+                    vertices1[pos_1:pos_2] = vertices1[pos_1:pos_2][::-1]
+
+        elif l[1][0] in vertices2 and l[1][1] in vertices2:
+            pos_1 = vertices2.index(l[1][0])
+            pos_2 = vertices2.index(l[1][1])
+            if pos_1 != pos_2 and pos_1 != pos_2-1 and pos_1 != pos_2+1:
+                v2 = copy.deepcopy(vertices2)
+                if calculate_score(v2, distance_matrix) < calculate_score(vertices2, distance_matrix):
+                    vertices2[pos_1:pos_2] = vertices2[pos_1:pos_2][::-1]
+
+    return vertices1, vertices2
